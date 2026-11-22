@@ -1,0 +1,128 @@
+name: Build FrameFlow IPA
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      signed:
+        description: Also export a signed IPA if credentials are configured
+        type: boolean
+        default: false
+      export_method:
+        description: Profile type for the optional signed export
+        type: choice
+        options: [debugging, release-testing]
+        default: debugging
+
+permissions:
+  contents: read
+
+env:
+  FRAMEFLOW_BUNDLE_ID: ${{ vars.FRAMEFLOW_BUNDLE_ID || 'com.frameflow.app' }}
+
+jobs:
+  unsigned:
+    runs-on: macos-26
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - name: Inspect Xcode installations and iOS SDKs
+        shell: bash
+        run: |
+          mkdir -p build/logs
+          python3 scripts/select-xcode.py 2>&1 | tee build/logs/toolchain.log
+      - name: Resolve Swift packages, build iphoneos Release, package and verify IPA
+        shell: bash
+        run: scripts/build-unsigned.sh 2>&1 | tee build/logs/unsigned.log
+      - name: Run iOS simulator tests
+        shell: bash
+        run: scripts/test-ios.sh 2>&1 | tee build/logs/simulator.log
+      - name: Upload verified unsigned IPA
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: FrameFlow-iOS-Unsigned
+          path: |
+            build/dist/FrameFlow-unsigned.ipa
+            build/dist/build-info.txt
+            build/dist/checksums.txt
+          if-no-files-found: error
+          compression-level: 0
+      - name: Keep build diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: FrameFlow-build-logs
+          path: build/logs/
+          if-no-files-found: warn
+
+  signed:
+    needs: unsigned
+    if: github.event_name == 'workflow_dispatch' && inputs.signed
+    runs-on: macos-26
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - name: Check credential availability
+        id: credentials
+        env:
+          HAS_CREDENTIALS: ${{ secrets.IOS_P12_BASE64 != '' && secrets.IOS_P12_PASSWORD != '' && secrets.IOS_PROFILE_BASE64 != '' }}
+        run: |
+          echo "ready=$HAS_CREDENTIALS" >> "$GITHUB_OUTPUT"
+          if [[ "$HAS_CREDENTIALS" != true ]]; then
+            echo "::notice::Signed export skipped. Configure all three signing secrets to enable it."
+          fi
+      - if: steps.credentials.outputs.ready == 'true'
+        run: python3 scripts/select-xcode.py
+      - name: Archive and export with manual signing
+        if: steps.credentials.outputs.ready == 'true'
+        env:
+          IOS_P12_BASE64: ${{ secrets.IOS_P12_BASE64 }}
+          IOS_P12_PASSWORD: ${{ secrets.IOS_P12_PASSWORD }}
+          IOS_PROFILE_BASE64: ${{ secrets.IOS_PROFILE_BASE64 }}
+          EXPORT_METHOD: ${{ inputs.export_method }}
+        shell: bash
+        run: |
+          mkdir -p build/logs
+          python3 scripts/build-signed.py 2>&1 | tee build/logs/signed.log
+      - if: steps.credentials.outputs.ready == 'true'
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: FrameFlow-iOS-Signed
+          path: build/signed/FrameFlow-signed.ipa
+          if-no-files-found: error
+          compression-level: 0
+      - if: failure()
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: FrameFlow-signed-logs
+          path: build/logs/*.log
+
+  release:
+    needs: unsigned
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v8.0.2
+        with:
+          name: FrameFlow-iOS-Unsigned
+          path: dist
+      - name: Verify and publish tag assets
+        working-directory: dist
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          sha256sum -c checksums.txt
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$TAG" FrameFlow-unsigned.ipa checksums.txt build-info.txt --clobber --repo "$GITHUB_REPOSITORY"
+          else
+            gh release create "$TAG" FrameFlow-unsigned.ipa checksums.txt build-info.txt --verify-tag --generate-notes --repo "$GITHUB_REPOSITORY"
+          fi
