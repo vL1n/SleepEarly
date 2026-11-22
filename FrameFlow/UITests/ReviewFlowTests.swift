@@ -20,7 +20,10 @@ final class ReviewFlowTests: XCTestCase {
         XCTAssertTrue(app.navigationBars["First.ARW"].waitForExistence(timeout: 5))
         let canvas = app.descendants(matching: .any).matching(identifier: "photo-canvas").firstMatch
         XCTAssertTrue(canvas.exists)
-        canvas.swipeRight()
+        // Start inside the picture; an edge-originated swipe is Back.
+        let from = canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.25, dy: 0.55))
+        let to = canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.83, dy: 0.55))
+        from.press(forDuration: 0.05, thenDragTo: to, withVelocity: .fast, thenHoldForDuration: 0)
         XCTAssertTrue(app.navigationBars["Second.ARW"].waitForExistence(timeout: 5))
         XCTAssertEqual(app.buttons["评分 4 星"].value as? String, "已选")
         modes.buttons["调色"].tap()

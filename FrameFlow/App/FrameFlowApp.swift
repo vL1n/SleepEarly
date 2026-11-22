@@ -18,6 +18,7 @@ struct FrameFlowApp: App {
             return container
         }
         #endif
+        try FileManager.default.createDirectory(at: .applicationSupportDirectory, withIntermediateDirectories: true)
         return try ModelContainer(for: Photo.self)
     }
 

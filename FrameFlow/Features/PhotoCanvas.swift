@@ -18,6 +18,8 @@ struct PhotoCanvas: UIViewRepresentable {
 
 final class CanvasScrollView: UIScrollView, UIScrollViewDelegate {
     private let picture = UIImageView()
+    private var pagingGestures: [UISwipeGestureRecognizer] = []
+    private let connectedNavigation = NSHashTable<UINavigationController>.weakObjects()
     private var lastSize = CGSize.zero
     private var aspect: CGFloat = 0
     private var isInspecting = false
@@ -40,6 +42,7 @@ final class CanvasScrollView: UIScrollView, UIScrollViewDelegate {
         for direction in [UISwipeGestureRecognizer.Direction.left, .right] {
             let swipe = UISwipeGestureRecognizer(target: self, action: #selector(swipe(_:)))
             swipe.direction = direction
+            pagingGestures.append(swipe)
             addGestureRecognizer(swipe)
             panGestureRecognizer.require(toFail: swipe)
         }
@@ -64,6 +67,7 @@ final class CanvasScrollView: UIScrollView, UIScrollViewDelegate {
 
     override func layoutSubviews() {
         super.layoutSubviews()
+        if window != nil { coordinateNavigationGestures() }
         let size = bounds.size
         guard size != lastSize, size.width > 0, size.height > 0, aspect > 0 else { return }
         lastSize = size
@@ -72,6 +76,30 @@ final class CanvasScrollView: UIScrollView, UIScrollViewDelegate {
         picture.frame = CGRect(x: 0, y: 0, width: width, height: width / aspect)
         contentSize = picture.frame.size
         centerPicture()
+    }
+
+    // A compact split view is hosted inside a navigation controller. Inside the
+    // photo, paging wins over full-width back; the screen edge still goes back.
+    private func coordinateNavigationGestures() {
+        var responder: UIResponder? = next
+        while let current = responder {
+            if let controller = current as? UIViewController,
+               let navigation = (controller as? UINavigationController) ?? controller.navigationController,
+               !connectedNavigation.contains(navigation) {
+                for swipe in pagingGestures {
+                    if let edgeBack = navigation.interactivePopGestureRecognizer {
+                        swipe.require(toFail: edgeBack)
+                    }
+                    #if compiler(>=6.2)
+                    if #available(iOS 26.0, *), let contentBack = navigation.interactiveContentPopGestureRecognizer {
+                        contentBack.require(toFail: swipe)
+                    }
+                    #endif
+                }
+                connectedNavigation.add(navigation)
+            }
+            responder = current.next
+        }
     }
 
     private func centerPicture() {
