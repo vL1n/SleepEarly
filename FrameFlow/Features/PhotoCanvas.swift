@@ -41,6 +41,7 @@ final class CanvasScrollView: UIScrollView, UIScrollViewDelegate {
             let swipe = UISwipeGestureRecognizer(target: self, action: #selector(swipe(_:)))
             swipe.direction = direction
             addGestureRecognizer(swipe)
+            panGestureRecognizer.require(toFail: swipe)
         }
         isAccessibilityElement = true
         accessibilityLabel = "照片预览"
@@ -91,6 +92,11 @@ final class CanvasScrollView: UIScrollView, UIScrollViewDelegate {
             guard let self, self.isInspecting == zoomed else { return }
             self.detail?(zoomed)
         }
+    }
+
+    override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+        if gestureRecognizer is UISwipeGestureRecognizer { return zoomScale <= 1.01 }
+        return super.gestureRecognizerShouldBegin(gestureRecognizer)
     }
 
     @objc private func swipe(_ recognizer: UISwipeGestureRecognizer) {

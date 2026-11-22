@@ -9,7 +9,36 @@ actor ThumbnailStore {
     static let shared = ThumbnailStore()
     private let cache = NSCache<NSURL, CGImage>()
 
-    init() { cache.totalCostLimit = 48 * 1024 * 1024 }
+    private final class EditedThumb {
+        let recipe: Recipe
+        let image: CGImage
+        init(_ recipe: Recipe, _ image: CGImage) {
+            self.recipe = recipe
+            self.image = image
+        }
+    }
+    private let editedCache = NSCache<NSURL, EditedThumb>()
+    private let thumbnailRenderer = RAWRenderer()
+
+    init() {
+        cache.totalCostLimit = 32 * 1024 * 1024
+        editedCache.totalCostLimit = 16 * 1024 * 1024
+    }
+
+    func quickPreview(at url: URL, edits: Recipe) throws -> CGImage {
+        if let cached = editedCache.object(forKey: url as NSURL), cached.recipe == edits { return cached.image }
+        return try image(at: url)
+    }
+
+    func image(at url: URL, edits: Recipe) async throws -> CGImage {
+        try Task.checkCancellation()
+        guard edits != Recipe() else { return try image(at: url) }
+        if let cached = editedCache.object(forKey: url as NSURL), cached.recipe == edits { return cached.image }
+        let image = try await thumbnailRenderer.preview(url, edits: edits, longEdge: 384)
+        try Task.checkCancellation()
+        editedCache.setObject(EditedThumb(edits, image), forKey: url as NSURL, cost: image.bytesPerRow * image.height)
+        return image
+    }
 
     func image(at url: URL) throws -> CGImage {
         try Task.checkCancellation()

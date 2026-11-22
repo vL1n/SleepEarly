@@ -18,7 +18,9 @@ final class ReviewFlowTests: XCTestCase {
         if advance.value as? String != "1" { advance.tap() }
         app.buttons["评分 4 星"].tap()
         XCTAssertTrue(app.navigationBars["First.ARW"].waitForExistence(timeout: 5))
-        app.buttons["上一张"].tap()
+        let canvas = app.descendants(matching: .any).matching(identifier: "photo-canvas").firstMatch
+        XCTAssertTrue(canvas.exists)
+        canvas.swipeRight()
         XCTAssertTrue(app.navigationBars["Second.ARW"].waitForExistence(timeout: 5))
         XCTAssertEqual(app.buttons["评分 4 星"].value as? String, "已选")
         modes.buttons["调色"].tap()

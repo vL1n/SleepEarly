@@ -53,7 +53,7 @@ struct LibraryView: View {
                         Label("照片库为空", systemImage: "sdcard")
                     } description: {
                         Text("接入 SD 读卡器，在“文件”中选择 Sony ARW 原片。")
-                    } actions: { Button("导入 ARW", action: { pick(.open) }).buttonStyle(.borderedProminent) }
+                    } actions: { Button("导入 ARW", action: { pick(.open) }).buttonStyle(.borderedProminent).disabled(busy) }
                 } else {
                     grid
                 }
@@ -65,7 +65,7 @@ struct LibraryView: View {
                     Button(multi ? "完成" : "多选") { multi.toggle(); selected.removeAll() }.disabled(photos.isEmpty)
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button { pick(.open) } label: { Label("导入 ARW", systemImage: "plus") }
+                    Button { pick(.open) } label: { Label("导入 ARW", systemImage: "plus") }.disabled(busy)
                 }
             }
         } detail: {
@@ -84,7 +84,7 @@ struct LibraryView: View {
                 ContentUnavailableView("选择照片", systemImage: "camera.aperture")
             }
         }
-        .disabled(busy)
+        .disabled(busy && operation != .open)
         .safeAreaInset(edge: .bottom) {
             if busy {
                 VStack(alignment: .leading, spacing: 5) {
@@ -238,9 +238,11 @@ struct LibraryView: View {
             Button("清理已校验的本地副本…", role: .destructive) { confirmClean = true }
                 .disabled(targets.isEmpty || targets.contains { $0.receipt == nil })
         } label: { Label("照片操作", systemImage: "ellipsis.circle") }
+        .disabled(busy)
     }
 
     private func pick(_ action: Operation) {
+        guard !busy else { return }
         operation = action
         pending = Set(targets.map(\.uuid))
         picking = true
@@ -331,6 +333,7 @@ private struct ThumbnailTile: View {
                 if photo.rating > 0 { Label("\(photo.rating)", systemImage: "star.fill").foregroundStyle(.orange) }
                 if photo.favorite { Image(systemName: "heart.fill").foregroundStyle(.pink) }
                 if photo.rejected { Image(systemName: "xmark.circle.fill").foregroundStyle(.red) }
+                if photo.recipe != Recipe() { Image(systemName: "slider.horizontal.3") }
                 if photo.receipt != nil { Image(systemName: "archivebox") }
             }.font(.caption2).frame(minHeight: 12)
 
@@ -339,15 +342,14 @@ private struct ThumbnailTile: View {
         .accessibilityLabel(photo.name)
         .accessibilityValue("\(photo.rating) 星" + (photo.favorite ? "，已收藏" : "") + (photo.rejected ? "，已淘汰" : ""))
         .accessibilityAddTraits(checked ? .isSelected : [])
-        .task(id: photo.local) {
-            image = nil
+        .task(id: photo.local ? photo.recipe : nil) {
             failed = false
-            guard photo.local else { return }
+            guard photo.local else { image = nil; return }
             do {
-                let result = try await ThumbnailStore.shared.image(at: LibraryFiles.raw(photo.uuid))
+                let result = try await ThumbnailStore.shared.image(at: LibraryFiles.raw(photo.uuid), edits: photo.recipe)
                 try Task.checkCancellation()
                 image = result
-            } catch { if !Task.isCancelled { failed = true } }
+            } catch { if !Task.isCancelled { failed = true; image = nil } }
         }
     }
 }

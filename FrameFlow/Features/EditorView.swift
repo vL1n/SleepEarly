@@ -48,6 +48,7 @@ struct EditorView: View {
     @SceneStorage("editor.mode") private var mode = EditorMode.review.rawValue
     @SceneStorage("editor.tool") private var toolName = Tool.exposure.rawValue
     @AppStorage("review.autoAdvance") private var autoAdvance = false
+    @Environment(\.scenePhase) private var phase
     @Environment(\.dynamicTypeSize) private var typeSize
 
     @State private var preview: CGImage?
@@ -89,6 +90,7 @@ struct EditorView: View {
         .navigationBarTitleDisplayMode(.inline)
         .onChange(of: request) { _, value in requests?.yield(value) }
         .task(id: photo.local) { await displayPreviews() }
+        .onChange(of: phase) { _, phase in if phase != .active { finishDrag() } }
         .onDisappear { finishDrag() }
     }
 
@@ -102,11 +104,13 @@ struct EditorView: View {
             Color(white: 0.055)
             if photo.local {
                 PhotoCanvas(image: preview, move: stepPhoto, detail: { zoomed = $0 })
+                    .accessibilityIdentifier("photo-canvas")
                 if let failure {
                     Text(failure).font(.callout).foregroundStyle(.white)
                         .padding().background(.black.opacity(0.75), in: RoundedRectangle(cornerRadius: 12))
+                        .allowsHitTesting(false)
                 } else if preview == nil {
-                    ProgressView().tint(.white)
+                    ProgressView().tint(.white).allowsHitTesting(false)
                 }
             } else {
                 Label("原片已归档", systemImage: "archivebox").foregroundStyle(.white)
@@ -338,7 +342,7 @@ struct EditorView: View {
         requests = sink
         sink.yield(request)
         defer { sink.finish() }
-        if let thumb = try? await ThumbnailStore.shared.image(at: url), !Task.isCancelled { preview = thumb }
+        if let thumb = try? await ThumbnailStore.shared.quickPreview(at: url, edits: photo.recipe), !Task.isCancelled { preview = thumb }
         var original: (edge: Int, image: CGImage)?
         for await item in stream {
             guard !Task.isCancelled else { break }
