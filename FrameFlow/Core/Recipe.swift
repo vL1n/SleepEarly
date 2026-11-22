@@ -55,3 +55,46 @@ struct FlowError: LocalizedError {
     init(_ message: String) { self.message = message }
     var errorDescription: String? { message }
 }
+
+/// One entry per completed adjustment, including a whole slider gesture.
+struct EditHistory {
+    private var past: [Recipe] = []
+    private var future: [Recipe] = []
+    var canUndo: Bool { !past.isEmpty }
+    var canRedo: Bool { !future.isEmpty }
+
+    mutating func record(from old: Recipe, to new: Recipe) {
+        guard old != new else { return }
+        past.append(old)
+        if past.count > 32 { past.removeFirst() }
+        future.removeAll()
+    }
+
+    mutating func undo(current: Recipe) -> Recipe? {
+        guard let prior = past.popLast() else { return nil }
+        future.append(current)
+        return prior
+    }
+
+    mutating func redo(current: Recipe) -> Recipe? {
+        guard let next = future.popLast() else { return nil }
+        past.append(current)
+        return next
+    }
+}
+
+/// Freeze the visible order on entry. Removing a star in a filtered review
+/// must still leave a well-defined next frame.
+struct ReviewSequence {
+    let ids: [UUID]
+    private let positions: [UUID: Int]
+    init(_ ids: [UUID] = []) {
+        self.ids = ids
+        positions = Dictionary(uniqueKeysWithValues: ids.enumerated().map { ($0.element, $0.offset) })
+    }
+    func index(of id: UUID) -> Int? { positions[id] }
+    func neighbor(of id: UUID, offset: Int) -> UUID? {
+        guard let index = positions[id], ids.indices.contains(index + offset) else { return nil }
+        return ids[index + offset]
+    }
+}

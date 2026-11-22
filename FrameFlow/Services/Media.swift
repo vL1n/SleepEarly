@@ -36,7 +36,20 @@ actor RAWRenderer {
     private let context = CIContext(options: [.cacheIntermediates: false])
     private let colorSpace = CGColorSpace(name: CGColorSpace.sRGB)!
 
-    private func render(_ url: URL, _ edits: Recipe, preview: Bool) throws -> CIImage {
+    // Retain one draft RAW graph. Post-RAW adjustments can reuse the decoded
+    // intermediate until exposure, white balance, source or resolution changes.
+    private struct DecodeKey: Equatable {
+        let url: URL
+        let exposure: Double
+        let temperature: Double
+        let longEdge: Int
+    }
+    private var decoded: (key: DecodeKey, image: CIImage)?
+
+    private func rawImage(_ url: URL, _ edits: Recipe, longEdge: Int?) throws -> CIImage {
+        let key = DecodeKey(url: url, exposure: edits.exposure, temperature: edits.temperatureOffset,
+                            longEdge: longEdge ?? 0)
+        if longEdge != nil, let decoded, decoded.key == key { return decoded.image }
         guard let raw = CIRAWFilter(imageURL: url) else {
             throw FlowError("当前系统无法解码此 ARW。请检查相机压缩模式及系统 RAW 支持。")
         }
@@ -44,11 +57,19 @@ actor RAWRenderer {
         if edits.temperatureOffset != 0 {
             raw.neutralTemperature = min(50000, max(2000, raw.neutralTemperature + Float(edits.temperatureOffset)))
         }
-        if preview {
+        if let longEdge {
             raw.isDraftModeEnabled = true
-            raw.scaleFactor = Float(min(1, 1600 / max(1, max(raw.nativeSize.width, raw.nativeSize.height))))
+            raw.scaleFactor = Float(min(1, CGFloat(longEdge) / max(1, max(raw.nativeSize.width, raw.nativeSize.height))))
         }
-        guard var image = raw.outputImage else { throw FlowError("RAW 解码失败") }
+        guard let rawImage = raw.outputImage else { throw FlowError("RAW 解码失败") }
+        guard longEdge != nil else { return rawImage }
+        let intermediate = rawImage.insertingIntermediate(cache: true)
+        decoded = (key, intermediate)
+        return intermediate
+    }
+
+    private func render(_ url: URL, _ edits: Recipe, longEdge: Int?) throws -> CIImage {
+        var image = try rawImage(url, edits, longEdge: longEdge)
         if edits.highlights != 1 || edits.shadows != 0 {
             let tone = CIFilter.highlightShadowAdjust()
             tone.inputImage = image
@@ -67,9 +88,9 @@ actor RAWRenderer {
         return image.cropped(to: edits.crop.rect(in: image.extent))
     }
 
-    func preview(_ url: URL, edits: Recipe) throws -> CGImage {
+    func preview(_ url: URL, edits: Recipe, longEdge: Int = 1600) throws -> CGImage {
         try Task.checkCancellation()
-        let image = try render(url, edits, preview: true)
+        let image = try render(url, edits, longEdge: longEdge)
         guard let result = context.createCGImage(image, from: image.extent, format: .RGBA8, colorSpace: colorSpace) else {
             throw FlowError("无法生成修图预览")
         }
@@ -78,7 +99,7 @@ actor RAWRenderer {
 
     func export(_ url: URL, edits: Recipe, to target: URL) throws {
         try Task.checkCancellation()
-        let image = try render(url, edits, preview: false)
+        let image = try render(url, edits, longEdge: nil)
         try context.writeJPEGRepresentation(of: image, to: target, colorSpace: colorSpace,
             options: [CIImageRepresentationOption(rawValue: kCGImageDestinationLossyCompressionQuality as String): 0.94])
     }

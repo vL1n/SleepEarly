@@ -5,6 +5,50 @@ import CryptoKit
 @testable import FrameFlow
 
 final class FrameFlowTests: XCTestCase {
+    func testHistoryGroupsChangesAndDropsRedoAfterNewEdit() {
+        var history = EditHistory()
+        history.record(from: Recipe(), to: .soft)
+        history.record(from: .soft, to: .soft)
+        XCTAssertEqual(history.undo(current: .soft), Recipe())
+        XCTAssertFalse(history.canUndo)
+        XCTAssertEqual(history.redo(current: Recipe()), .soft)
+        _ = history.undo(current: .soft)
+        history.record(from: Recipe(), to: .vivid)
+        XCTAssertFalse(history.canRedo)
+        XCTAssertEqual(history.undo(current: .vivid), Recipe())
+    }
+
+    func testFilteredReviewKeepsOriginalNeighborsAndStopsAtEnds() {
+        let ids = [UUID(), UUID(), UUID()]
+        let sequence = ReviewSequence(ids)
+        XCTAssertEqual(sequence.neighbor(of: ids[1], offset: 1), ids[2])
+        XCTAssertNil(sequence.neighbor(of: ids[0], offset: -1))
+        XCTAssertNil(sequence.neighbor(of: ids[2], offset: 1))
+        XCTAssertNil(sequence.index(of: UUID()))
+    }
+
+    @MainActor
+    func testHigherResolutionPreviewPreservesZoomAndCropRefits() throws {
+        let view = CanvasScrollView()
+        view.frame = CGRect(x: 0, y: 0, width: 390, height: 450)
+        func image(_ width: Int, _ height: Int) -> CGImage {
+            let size = CGSize(width: width, height: height)
+            return UIGraphicsImageRenderer(size: size).image { context in
+                UIColor.gray.setFill()
+                context.fill(CGRect(origin: .zero, size: size))
+            }.cgImage!
+        }
+        view.display(image(60, 40))
+        view.layoutIfNeeded()
+        view.setZoomScale(2, animated: false)
+        view.display(image(180, 120))
+        view.layoutIfNeeded()
+        XCTAssertEqual(view.zoomScale, 2, accuracy: 0.01)
+        view.display(image(100, 100))
+        view.layoutIfNeeded()
+        XCTAssertEqual(view.zoomScale, 1, accuracy: 0.01)
+    }
+
     func testEditsAreStablePortableJSON() throws {
         let p = PhotoSnapshot(schemaVersion: 1, id: UUID(), originalName: "DSC0001.ARW",
                               rawSHA256: "abc", rating: 5, favorite: true, rejected: false, edits: .soft)

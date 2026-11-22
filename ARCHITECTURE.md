@@ -10,7 +10,7 @@
 
 界面和 ModelContext 在主 actor 上。文件和图像工作在各自 actor 中执行，后台工作使用 Sendable 值快照、URL 与 CGImage。缩略图由独立的串行 actor 使用 ImageIO 获取，限长边 384 像素；有内嵌预览时优先使用。NSCache 根据解码大小计费，48 MiB 的预算配合系统回收。离开视野的任务检测取消。
 
-编辑预览与导出共享一个串行 RAWRenderer 和 CIContext。预览使用草稿模式，最长边目标为 1600 像素，滑块更新有短暂防抖。曝光和色温进入 CIRAWFilter，随后应用高光阴影、对比度和裁剪。JPEG 从原始 ARW 重新运行相同配方，使用原生解码尺寸和 sRGB。批处理顺序处理每张图，进度以已完成文件数表示。缩略图可以与一次显影并行。
+编辑预览与导出共享一个串行 RAWRenderer 和 CIContext。预览先显示 ImageIO 缩略图，再显示 RAW 草稿显影。常规预览的长边目标为 1600 像素，拖动中为 900，放大检查为 3200。预览请求以单消费者 AsyncStream 合并，最多保留一个等待中的最新请求。源文件、曝光、色温和分辨率一致时复用同一份 Core Image 解码中间结果。曝光和色温进入 CIRAWFilter，随后应用高光阴影、对比度和裁剪。JPEG 从原始 ARW 重新运行相同配方，使用原生解码尺寸和 sRGB。批处理顺序处理每张图，进度以已完成文件数表示。缩略图可以与一次显影并行。
 
 ## 归档事务与恢复边界
 
@@ -22,4 +22,4 @@
 
 系统“文件”管理 SMB 连接、凭据及协议协商。App 将最近归档根目录的书签存放在默认 Keychain 访问组，采用设备解锁时可用且仅限本机的保护等级。授权失效时由用户重新选择目录。网络操作为前台文件操作，不申请后台无限运行或特殊网络 entitlement。
 
-一个 App target 服务 iPhone 和 iPad，单独的测试 target 通过宿主 App 运行。Simulator 测试产物与 Release-iphoneos 产物位于不同 DerivedData。共享 scheme 与显式 PBXSourcesBuildPhase 固定 target membership。Xcode 和 CI 使用相同工程。
+一个 App target 服务 iPhone 和 iPad，单元测试通过宿主 App 运行，UI 测试 target 使用独立内存目录验证连续选片和编辑控件。Simulator 测试产物与 Release-iphoneos 产物位于不同 DerivedData。共享 scheme 与显式 PBXSourcesBuildPhase 固定 target membership。Xcode 和 CI 使用相同工程。
